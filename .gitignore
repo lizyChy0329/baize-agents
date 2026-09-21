@@ -1,0 +1,107 @@
+# ===== 操作系统 =====
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ===== 编辑器 / IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ===== 环境变量 / 密钥 =====
+.env
+.env.*
+!.env.example
+config.json
+*.pem
+*.key
+*.p12
+secrets.*
+credentials.*
+config.local.*
+
+# ===== 日志 =====
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# ===== 依赖 / 构建产物 =====
+node_modules/
+jspm_packages/
+bower_components/
+dist/
+build/
+out/
+target/
+vendor/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+Pipfile.lock
+poetry.lock
+
+# ===== 测试 / 覆盖率 =====
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+.nyc_output/
+.coveralls.yml
+
+# ===== 包管理锁文件缓存 =====
+.pnpm-store/
+.yarn/
+yarn-error.log
+npm-debug.log*
+package-lock.json
+
+# ===== 编译产物 =====
+*.class
+*.jar
+*.war
+*.ear
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.out
+*.app
+
+# ===== 临时文件 =====
+*.tmp
+*.temp
+*.bak
+*.cache
+.cache/
+tmp/
+temp/
+
+# ===== 工具特定 =====
+.terraform/
+*.tfstate
+*.tfstate.*
+.DS_Store

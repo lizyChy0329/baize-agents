@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baize-agents"
+version = "0.1.0"
+description = "A minimal agent skeleton for learning"
+readme = "README.md"
+requires-python = ">=3.11"
+# 里程碑 1 无第三方运行时依赖，全部使用标准库。
+dependencies = []
+
+[project.scripts]
+baize = "baize_agents.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

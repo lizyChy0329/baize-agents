@@ -1,13 +1,15 @@
 """命令行入口：baize -m "hello" 或 python -m baize_agents -m "hello"。
 
-里程碑 2.1：provider 已支持 tools，但 CLI 仍是纯问答（runner 循环在 2.3 接入）。
+里程碑 2.3：接上 runner 循环，模型可以自己调用工具（目前只有 file_read）。
 """
 from __future__ import annotations
 
 import argparse
+import sys
 
 from .config import ConfigError, load_config
 from .providers.openai_compat import OpenAICompatProvider, ProviderError
+from .runner import RunnerError, run
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -18,6 +20,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-m", "--message", required=True, help="要发给模型的消息")
     parser.add_argument("--config", default=None, help="配置文件路径（默认 ./config.json）")
     return parser
+
+
+def _trace_tool_call(name: str, arguments: str, result: str) -> None:
+    """把"模型要调什么工具、结果如何"打印到 stderr，方便观察循环在干嘛。
+
+    用 stderr 是为了不污染 stdout 上的最终答案（方便管道处理）。
+    """
+    preview = result.replace("\n", "\\n")
+    if len(preview) > 80:
+        preview = preview[:80] + "..."
+    print(f"[工具] {name}({arguments})", file=sys.stderr)
+    print(f"[结果] {preview}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,11 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     messages = [{"role": "user", "content": args.message}]
 
     try:
-        message = provider.chat(messages)
-    except ProviderError as e:
+        reply = run(provider, messages, on_tool_call=_trace_tool_call)
+    except (ProviderError, RunnerError) as e:
         print(f"[错误] {e}")
         return 1
 
-    # provider 现在返回完整 message；这里先只取文本部分。
-    print(message.get("content") or "")
+    print(reply)
     return 0

@@ -1,6 +1,6 @@
 # baize-agents
 
-一个用来**学习如何写 agent** 的最小骨架。当前处于里程碑 1：能调一个 OpenAI 兼容模型，完成一次问答（无工具、无记忆）。
+一个用来**学习如何写 agent** 的最小骨架。当前处于里程碑 2：模型能自己调用工具（`file_read`）来回答问题。
 
 ## 目录结构
 
@@ -9,8 +9,13 @@ src/baize_agents/
 ├── __main__.py               # python -m baize_agents 入口
 ├── cli.py                    # 命令行入口
 ├── config.py                 # 配置加载（JSON + .env）
-└── providers/
-    └── openai_compat.py      # OpenAI 兼容接口客户端（仅标准库）
+├── runner.py                 # agent 循环（模型 ⇄ 工具）
+├── providers/
+│   └── openai_compat.py      # OpenAI 兼容接口客户端（仅标准库）
+└── tools/
+    ├── base.py               # Tool 类型（说明书 + 函数）
+    ├── file_read.py          # 读文件工具
+    └── __init__.py           # 工具注册表
 ```
 
 ## 快速开始
@@ -93,6 +98,16 @@ python -m baize_agents -m "hello"
 ## 里程碑路线图
 
 - [x] 里程碑 1：`-m "hello"` 一次性问答（无工具）
-- [ ] 里程碑 2：Runner 循环（工具调用分支）
-- [ ] 里程碑 3：`file_read` 等工具
+- [x] 里程碑 2：Runner 循环 + `file_read` 工具
+- [ ] 里程碑 3：更多工具（`web_fetch` 等）
 - [ ] 里程碑 4：会话持久化（JSONL）与多模型
+
+## 试试 agent 循环
+
+```bash
+# 模型会自己调 file_read 读取文件再回答
+baize -m "读一下 README.md，用一句话概括它"
+baize -m "pyproject.toml 里 name 字段是什么？"
+```
+
+工具调用过程会打印到 stderr（`[工具] ...` / `[结果] ...`），最终答案在 stdout。

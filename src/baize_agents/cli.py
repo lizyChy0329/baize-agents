@@ -1,6 +1,14 @@
 """命令行入口：baize -m "hello" 或 python -m baize_agents -m "hello"。
 
-里程碑 2.3：接上 runner 循环，模型可以自己调用工具（目前只有 file_read）。
+里程碑 4：会话历史持久化到 JSONL，可跨次对话记住上下文。
+
+用法：
+    baize -m "我叫小明"              # 默认会话 default
+    baize -m "我叫什么？"            # 会记得上文
+    baize -s work -m "..."           # 用名为 work 的会话
+    baize --no-session -m "..."      # 一次性问答，不读也不写历史
+    baize --list                     # 列出所有会话
+    baize -s work --clear            # 清空某个会话
 """
 from __future__ import annotations
 
@@ -10,14 +18,28 @@ import sys
 from .config import ConfigError, load_config
 from .providers.openai_compat import OpenAICompatProvider, ProviderError
 from .runner import RunnerError, run
+from .session import Session, SessionError, list_sessions
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="baize",
-        description="最小可用的 agent 骨架：一次问答。",
+        description="最小可用的 agent 骨架：带工具的问答。",
     )
-    parser.add_argument("-m", "--message", required=True, help="要发给模型的消息")
+    parser.add_argument("-m", "--message", help="要发给模型的消息")
+    parser.add_argument(
+        "-s",
+        "--session",
+        default="default",
+        help="会话名，历史存到 ~/.baize-agents/sessions/<名字>.jsonl（默认 default）",
+    )
+    parser.add_argument(
+        "--no-session",
+        action="store_true",
+        help="不读写会话历史，纯一次性问答",
+    )
+    parser.add_argument("--list", action="store_true", help="列出所有会话后退出")
+    parser.add_argument("--clear", action="store_true", help="清空指定会话后退出")
     parser.add_argument("--config", default=None, help="配置文件路径（默认 ./config.json）")
     return parser
 
@@ -35,8 +57,29 @@ def _trace_tool_call(name: str, arguments: str, result: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
 
+    # ---- 不消耗模型的子命令 ----
+    if args.list:
+        names = list_sessions()
+        print("\n".join(names) if names else "（还没有任何会话）")
+        return 0
+
+    if args.clear:
+        try:
+            Session(args.session).clear()
+        except SessionError as e:
+            print(f"[错误] {e}")
+            return 1
+        print(f"已清空会话：{args.session}")
+        return 0
+
+    if not args.message:
+        print("[错误] 需要 -m/--message（或用 --list / --clear）")
+        return 1
+
+    # ---- 准备 provider ----
     try:
         config = load_config(args.config)
         provider = OpenAICompatProvider(config.provider)
@@ -44,13 +87,34 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[错误] {e}")
         return 1
 
-    messages = [{"role": "user", "content": args.message}]
+    # ---- 准备消息历史 ----
+    try:
+        session = None if args.no_session else Session(args.session)
+        if session is not None:
+            session.load()
+    except SessionError as e:
+        print(f"[错误] {e}")
+        return 1
 
+    if session is not None:
+        if len(session):
+            print(f"[会话 {session.name}] 载入 {len(session)} 条历史", file=sys.stderr)
+        session.add({"role": "user", "content": args.message})
+        session.sync()  # 先把用户消息落盘，避免后面崩溃丢失
+        messages = session.messages
+    else:
+        messages = [{"role": "user", "content": args.message}]
+
+    # ---- 跑 agent 循环 ----
     try:
         reply = run(provider, messages, on_tool_call=_trace_tool_call)
     except (ProviderError, RunnerError) as e:
         print(f"[错误] {e}")
         return 1
+    finally:
+        # 即使中途失败，也把已经发生的消息落盘
+        if session is not None:
+            session.sync()
 
     print(reply)
     return 0

@@ -1,6 +1,6 @@
 """命令行入口：baize -m "hello" 或 python -m baize_agents -m "hello"。
 
-里程碑 1：一次性问答，无工具、无会话记忆。
+里程碑 2.1：provider 已支持 tools，但 CLI 仍是纯问答（runner 循环在 2.3 接入）。
 """
 from __future__ import annotations
 
@@ -33,10 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     messages = [{"role": "user", "content": args.message}]
 
     try:
-        reply = provider.chat(messages)
+        message = provider.chat(messages)
     except ProviderError as e:
         print(f"[错误] {e}")
         return 1
 
-    print(reply)
+    # provider 现在返回完整 message；这里先只取文本部分。
+    print(message.get("content") or "")
     return 0

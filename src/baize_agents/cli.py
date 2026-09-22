@@ -1,12 +1,13 @@
 """命令行入口：baize -m "hello" 或 python -m baize_agents -m "hello"。
 
-里程碑 4：会话历史持久化到 JSONL，可跨次对话记住上下文。
+里程碑 4：会话历史持久化到 JSONL，可跨次对话记住上下文；支持多 provider 切换。
 
 用法：
     baize -m "我叫小明"              # 默认会话 default
     baize -m "我叫什么？"            # 会记得上文
     baize -s work -m "..."           # 用名为 work 的会话
     baize --no-session -m "..."      # 一次性问答，不读也不写历史
+    baize -p ollama -m "..."         # 换一个 provider
     baize --list                     # 列出所有会话
     baize -s work --clear            # 清空某个会话
 """
@@ -41,6 +42,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--list", action="store_true", help="列出所有会话后退出")
     parser.add_argument("--clear", action="store_true", help="清空指定会话后退出")
     parser.add_argument("--config", default=None, help="配置文件路径（默认 ./config.json）")
+    parser.add_argument(
+        "-p",
+        "--provider",
+        default=None,
+        help="用哪个 provider（config.json 里定义的名字，默认取 default_provider）",
+    )
     return parser
 
 
@@ -82,10 +89,15 @@ def main(argv: list[str] | None = None) -> int:
     # ---- 准备 provider ----
     try:
         config = load_config(args.config)
-        provider = OpenAICompatProvider(config.provider)
+        provider_config = config.get(args.provider)
+        provider = OpenAICompatProvider(provider_config)
     except (ConfigError, ProviderError) as e:
         print(f"[错误] {e}")
         return 1
+
+    if len(config.names) > 1:
+        used = args.provider or config.default
+        print(f"[provider] {used} ({provider_config.model})", file=sys.stderr)
 
     # ---- 准备消息历史 ----
     try:

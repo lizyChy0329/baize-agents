@@ -1,6 +1,6 @@
 # baize-agents
 
-一个用来**学习如何写 agent** 的最小骨架。当前处于里程碑 2：模型能自己调用工具（`file_read`）来回答问题。
+一个用来**学习如何写 agent** 的最小骨架。当前处于里程碑 4：模型能自己调用工具（`file_read`）、能记住跨次对话的历史、支持多 provider 切换。
 
 ## 目录结构
 
@@ -8,7 +8,8 @@
 src/baize_agents/
 ├── __main__.py               # python -m baize_agents 入口
 ├── cli.py                    # 命令行入口
-├── config.py                 # 配置加载（JSON + .env）
+├── config.py                 # 配置加载（JSON + .env，支持多 provider）
+├── session.py                # 会话持久化（JSONL）
 ├── runner.py                 # agent 循环（模型 ⇄ 工具）
 ├── providers/
 │   └── openai_compat.py      # OpenAI 兼容接口客户端（仅标准库）
@@ -44,45 +45,52 @@ baize -m "hello"
 python -m baize_agents -m "hello"
 ```
 
+## 会话记忆
+
+默认会把历史存进 `~/.baize-agents/sessions/<会话名>.jsonl`，所以**跨次调用能记住上下文**：
+
+```bash
+baize -m "我叫小明"       # 第一次
+baize -m "我叫什么名字？"  # 会答“小明”
+```
+
+```bash
+baize -s work -m "..."    # 用名为 work 的独立会话
+baize --list               # 列出所有会话
+baize -s work --clear      # 清空某个会话
+baize --no-session -m "."  # 一次性问答，不读也不写历史
+```
+
+存储位置由 `BAIZE_HOME` 控制，默认 `~/.baize-agents`。
+
 ## 支持的 provider
 
-改 `config.json` 里的 `base_url` / `model` / `api_key_env` 即可切换，任何 OpenAI 兼容服务都行。
-
-### DeepSeek（默认示例）
+`config.json` 里可以定义多个 provider，用 `-p/--provider` 切换：
 
 ```json
 {
-  "provider": {
-    "base_url": "https://api.deepseek.com/v1",
-    "model": "deepseek-chat",
-    "api_key_env": "DEEPSEEK_API_KEY"
+  "default_provider": "deepseek",
+  "providers": {
+    "deepseek": {
+      "base_url": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "api_key_env": "DEEPSEEK_API_KEY"
+    },
+    "ollama": {
+      "base_url": "http://localhost:11434/v1",
+      "model": "llama3.2",
+      "api_key": "ollama"
+    }
   }
 }
 ```
 
-### OpenRouter
-
-```json
-{
-  "provider": {
-    "base_url": "https://openrouter.ai/api/v1",
-    "model": "openai/gpt-4o-mini",
-    "api_key_env": "OPENROUTER_API_KEY"
-  }
-}
+```bash
+baize -m "hello"           # 用 default_provider
+baize -p ollama -m "hello" # 换一个
 ```
 
-### 本地 Ollama
-
-```json
-{
-  "provider": {
-    "base_url": "http://localhost:11434/v1",
-    "model": "llama3.2",
-    "api_key": "ollama"
-  }
-}
-```
+也兼容只有一个 provider 的旧写法：`{"provider": { ... }}`。
 
 （Ollama 不需要真实密钥，随便填一个非空字符串即可。）
 
@@ -93,14 +101,13 @@ python -m baize_agents -m "hello"
 - `api_key_env`：从哪个环境变量读密钥（**推荐**，避免密钥进 JSON）
 - `api_key`：直接写在 JSON 里的密钥（不推荐）
 
-配置文件查找顺序：`--config` 参数 → `./config.json` → `~/.config/baize-agents/config.json`。
-
 ## 里程碑路线图
 
 - [x] 里程碑 1：`-m "hello"` 一次性问答（无工具）
 - [x] 里程碑 2：Runner 循环 + `file_read` 工具
-- [ ] 里程碑 3：更多工具（`web_fetch` 等）
-- [ ] 里程碑 4：会话持久化（JSONL）与多模型
+- [x] 里程碑 4：会话持久化（JSONL）与多 provider
+- [ ] 里程碑 3：更多工具（`web_fetch`、`file_write` 等）
+- [ ] 后续：交互式 REPL、历史截断/摘要
 
 ## 试试 agent 循环
 

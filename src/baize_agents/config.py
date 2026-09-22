@@ -1,9 +1,20 @@
-"""配置加载：从 JSON 读取一个 OpenAI 兼容 provider。
+"""配置加载：从 JSON 读取一个或多个 OpenAI 兼容 provider。
 
 搜索顺序：
 1. 命令行 --config 指定的路径
 2. 当前目录 ./config.json
 3. ~/.config/baize-agents/config.json
+
+配置格式（多 provider）：
+{
+  "default_provider": "deepseek",
+  "providers": {
+    "deepseek": {"base_url": "...", "model": "...", "api_key_env": "DEEPSEEK_API_KEY"},
+    "ollama":   {"base_url": "...", "model": "...", "api_key": "ollama"}
+  }
+}
+
+也兼容单 provider 的旧格式：{"provider": {...}}
 
 API key 支持两种写法（优先用 api_key_env，避免把密钥写进 JSON）：
 - api_key_env: 从环境变量读取（自动加载当前目录的 .env）
@@ -44,7 +55,26 @@ class ProviderConfig:
 
 @dataclass(frozen=True)
 class Config:
-    provider: ProviderConfig
+    """可能配置了多个 provider，default 指定默认用哪个。"""
+
+    providers: dict[str, ProviderConfig]
+    default: str
+
+    @property
+    def provider(self) -> ProviderConfig:
+        """向后兼容：直接取默认 provider。"""
+        return self.get()
+
+    @property
+    def names(self) -> list[str]:
+        return sorted(self.providers)
+
+    def get(self, name: str | None = None) -> ProviderConfig:
+        key = name or self.default
+        if key not in self.providers:
+            available = ", ".join(self.names)
+            raise ConfigError(f"未知 provider：{key!r}。可选：{available}")
+        return self.providers[key]
 
 
 def _validate_api_key(key: str, source: str) -> str:
@@ -89,6 +119,20 @@ def _find_config(explicit: str | None) -> Path:
     )
 
 
+def _parse_provider(raw: dict, where: str) -> ProviderConfig:
+    provider = ProviderConfig(
+        base_url=raw.get("base_url", ""),
+        model=raw.get("model", ""),
+        api_key_env=raw.get("api_key_env"),
+        api_key=raw.get("api_key"),
+    )
+    if not provider.base_url:
+        raise ConfigError(f"{where}.base_url 不能为空")
+    if not provider.model:
+        raise ConfigError(f"{where}.model 不能为空")
+    return provider
+
+
 def load_config(explicit: str | None = None) -> Config:
     _load_dotenv(Path(".env"))
     path = _find_config(explicit)
@@ -98,19 +142,31 @@ def load_config(explicit: str | None = None) -> Config:
     except json.JSONDecodeError as e:
         raise ConfigError(f"配置文件 {path} 不是合法 JSON：{e}") from e
 
-    provider_raw = raw.get("provider")
-    if not isinstance(provider_raw, dict):
-        raise ConfigError(f"配置文件 {path} 缺少 provider 字段")
+    # 新格式：{"default_provider": "deepseek", "providers": {"deepseek": {...}, ...}}
+    if "providers" in raw:
+        providers_raw = raw["providers"]
+        if not isinstance(providers_raw, dict) or not providers_raw:
+            raise ConfigError(f"配置文件 {path} 的 providers 必须是非空对象")
+        default = raw.get("default_provider") or next(iter(providers_raw))
+        if default not in providers_raw:
+            raise ConfigError(
+                f"配置文件 {path} 的 default_provider={default!r} 不在 providers 里"
+            )
+    # 旧格式（里程碑1~3）：{"provider": {...}}
+    elif "provider" in raw:
+        if not isinstance(raw["provider"], dict):
+            raise ConfigError(f"配置文件 {path} 的 provider 必须是对象")
+        providers_raw = {"default": raw["provider"]}
+        default = "default"
+    else:
+        raise ConfigError(f"配置文件 {path} 缺少 provider 或 providers 字段")
 
-    provider = ProviderConfig(
-        base_url=provider_raw.get("base_url", ""),
-        model=provider_raw.get("model", ""),
-        api_key_env=provider_raw.get("api_key_env"),
-        api_key=provider_raw.get("api_key"),
-    )
-    if not provider.base_url:
-        raise ConfigError(f"配置文件 {path} 的 provider.base_url 不能为空")
-    if not provider.model:
-        raise ConfigError(f"配置文件 {path} 的 provider.model 不能为空")
+    providers = {
+        name: _parse_provider(item, f"{path} 的 providers.{name}")
+        for name, item in providers_raw.items()
+        if isinstance(item, dict)
+    }
+    if len(providers) != len(providers_raw):
+        raise ConfigError(f"配置文件 {path} 的 providers 里每一项都必须是对象")
 
-    return Config(provider=provider)
+    return Config(providers=providers, default=default)

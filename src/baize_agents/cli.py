@@ -18,7 +18,8 @@ import argparse
 import sys
 
 from .config import ConfigError, load_config
-from .providers.openai_compat import OpenAICompatProvider, ProviderError
+from .providers.errors import ProviderError
+from .providers.openai_compat import OpenAICompatProvider
 from .repl import run_repl
 from .runner import RunnerError, run
 from .session import Session, SessionError, list_sessions
@@ -65,6 +66,14 @@ def _trace_tool_call(name: str, arguments: str, result: str) -> None:
     print(f"[结果] {preview}", file=sys.stderr)
 
 
+def _trace_retry(attempt: int, error: Exception, delay: float) -> None:
+    """重试时提示一下，否则用户会以为程序卡住了。"""
+    print(
+        f"[重试 {attempt}] {error}\n         等待 {delay:.1f}s 后重试...",
+        file=sys.stderr,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -92,7 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config)
         provider_config = config.get(args.provider)
-        provider = OpenAICompatProvider(provider_config)
+        provider = OpenAICompatProvider(
+            provider_config, config.retry, on_retry=_trace_retry
+        )
     except (ConfigError, ProviderError) as e:
         print(f"[错误] {e}")
         return 1

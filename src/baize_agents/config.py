@@ -19,6 +19,11 @@
 API key 支持两种写法（优先用 api_key_env，避免把密钥写进 JSON）：
 - api_key_env: 从环境变量读取（自动加载当前目录的 .env）
 - api_key:     直接写在 JSON 里（不推荐）
+
+可选的顶层 retry 配置（不写就用默认值）：
+{
+  "retry": {"max_attempts": 4, "base_delay": 1.0, "max_delay": 30.0}
+}
 """
 from __future__ import annotations
 
@@ -26,6 +31,8 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from .providers.retry import RetryPolicy
 
 
 class ConfigError(Exception):
@@ -59,6 +66,7 @@ class Config:
 
     providers: dict[str, ProviderConfig]
     default: str
+    retry: RetryPolicy
 
     @property
     def provider(self) -> ProviderConfig:
@@ -133,6 +141,25 @@ def _parse_provider(raw: dict, where: str) -> ProviderConfig:
     return provider
 
 
+def _parse_retry(raw: object, path: Path) -> RetryPolicy:
+    if raw is None:
+        return RetryPolicy()
+    if not isinstance(raw, dict):
+        raise ConfigError(f"配置文件 {path} 的 retry 必须是对象")
+    try:
+        policy = RetryPolicy(
+            max_attempts=int(raw.get("max_attempts", 4)),
+            base_delay=float(raw.get("base_delay", 1.0)),
+            max_delay=float(raw.get("max_delay", 30.0)),
+            jitter_ratio=float(raw.get("jitter_ratio", 0.25)),
+        )
+    except (TypeError, ValueError) as e:
+        raise ConfigError(f"配置文件 {path} 的 retry 字段不合法：{e}") from e
+    if policy.max_attempts < 1:
+        raise ConfigError(f"配置文件 {path} 的 retry.max_attempts 至少为 1")
+    return policy
+
+
 def load_config(explicit: str | None = None) -> Config:
     _load_dotenv(Path(".env"))
     path = _find_config(explicit)
@@ -169,4 +196,4 @@ def load_config(explicit: str | None = None) -> Config:
     if len(providers) != len(providers_raw):
         raise ConfigError(f"配置文件 {path} 的 providers 里每一项都必须是对象")
 
-    return Config(providers=providers, default=default)
+    return Config(providers=providers, default=default, retry=_parse_retry(raw.get("retry"), path))

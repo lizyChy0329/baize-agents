@@ -9,7 +9,7 @@ import json
 from typing import Any, Callable
 
 from . import tools
-from .providers.openai_compat import OpenAICompatProvider
+from .providers.base import Provider
 
 # 一轮 = 一次模型请求（一次可能执行多个工具）
 MAX_TURNS = 10
@@ -23,7 +23,7 @@ class RunnerError(Exception):
 
 
 def run(
-    provider: OpenAICompatProvider,
+    provider: Provider,
     messages: list[dict[str, Any]],
     max_turns: int = MAX_TURNS,
     on_tool_call: ToolCallHook | None = None,

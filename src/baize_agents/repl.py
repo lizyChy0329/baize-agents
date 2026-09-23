@@ -12,7 +12,8 @@ import sys
 from typing import Any, Callable
 
 from . import tools
-from .providers.openai_compat import OpenAICompatProvider, ProviderError
+from .providers.base import Provider
+from .providers.errors import ProviderError
 from .runner import RunnerError, run
 from .session import Session
 
@@ -44,7 +45,7 @@ def _handle_command(line: str, session: Session) -> bool:
 
 
 def run_repl(
-    provider: OpenAICompatProvider,
+    provider: Provider,
     session: Session,
     on_tool_call: Callable[[str, str, str], None] | None = None,
 ) -> int:

@@ -8,11 +8,18 @@ version = "0.1.0"
 description = "A minimal agent skeleton for learning"
 readme = "README.md"
 requires-python = ">=3.11"
-# 里程碑 1 无第三方运行时依赖，全部使用标准库。
+# 运行时无第三方依赖，全部使用标准库。
 dependencies = []
+
+[project.optional-dependencies]
+# 开发/测试依赖：pip install -e ".[dev]"
+dev = ["pytest>=8"]
 
 [project.scripts]
 baize = "baize_agents.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

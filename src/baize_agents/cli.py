@@ -1,9 +1,10 @@
 """命令行入口：baize -m "hello" 或 python -m baize_agents -m "hello"。
 
-里程碑 4：会话历史持久化到 JSONL，可跨次对话记住上下文；支持多 provider 切换。
+里程碑 5：不带 -m 时进入交互模式（REPL），可以像聊天一样连续对话。
 
 用法：
-    baize -m "我叫小明"              # 默认会话 default
+    baize                            # 交互模式（推荐）
+    baize -m "hello"                 # 一次性提问
     baize -m "我叫什么？"            # 会记得上文
     baize -s work -m "..."           # 用名为 work 的会话
     baize --no-session -m "..."      # 一次性问答，不读也不写历史
@@ -18,6 +19,7 @@ import sys
 
 from .config import ConfigError, load_config
 from .providers.openai_compat import OpenAICompatProvider, ProviderError
+from .repl import run_repl
 from .runner import RunnerError, run
 from .session import Session, SessionError, list_sessions
 
@@ -82,8 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"已清空会话：{args.session}")
         return 0
 
-    if not args.message:
-        print("[错误] 需要 -m/--message（或用 --list / --clear）")
+    if not args.message and args.no_session:
+        print("[错误] --no-session 只能用于一次性问答；交互模式需要有会话")
         return 1
 
     # ---- 准备 provider ----
@@ -111,6 +113,14 @@ def main(argv: list[str] | None = None) -> int:
     if session is not None:
         if len(session):
             print(f"[会话 {session.name}] 载入 {len(session)} 条历史", file=sys.stderr)
+
+    # ---- 没有 -m：进交互模式 ----
+    if not args.message:
+        assert session is not None  # 前面已挡住 --no-session 的情况
+        return run_repl(provider, session, on_tool_call=_trace_tool_call)
+
+    # ---- 有 -m：一次性问答 ----
+    if session is not None:
         session.add({"role": "user", "content": args.message})
         session.sync()  # 先把用户消息落盘，避免后面崩溃丢失
         messages = session.messages

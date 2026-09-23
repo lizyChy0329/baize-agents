@@ -1,6 +1,6 @@
 # baize-agents
 
-一个用来**学习如何写 agent** 的最小骨架。当前处于里程碑 4：模型能自己调用工具（`file_read`）、能记住跨次对话的历史、支持多 provider 切换。
+一个用来**学习如何写 agent** 的最小骨架。当前处于里程碑 5：模型能自己调用工具（`file_read`）、能记住跨次对话的历史、支持多 provider 切换、可交互式对话。
 
 ## 目录结构
 
@@ -11,6 +11,7 @@ src/baize_agents/
 ├── config.py                 # 配置加载（JSON + .env，支持多 provider）
 ├── session.py                # 会话持久化（JSONL）
 ├── runner.py                 # agent 循环（模型 ⇄ 工具）
+├── repl.py                   # 交互模式
 ├── providers/
 │   └── openai_compat.py      # OpenAI 兼容接口客户端（仅标准库）
 └── tools/
@@ -40,10 +41,25 @@ cp .env.example .env
 然后运行：
 
 ```bash
-baize -m "hello"
-# 或
-python -m baize_agents -m "hello"
+baize                      # 交互模式，像聊天一样连续对话
+baize -m "hello"           # 一次性提问
 ```
+
+## 交互模式
+
+不带 `-m` 就进入 REPL，可以连续对话，历史会被记住：
+
+```
+$ baize
+baize-agents 交互模式（会话 default）。/help 看命令，/exit 退出。
+> 我叫小明
+你好，小明！
+> 我叫什么名字？
+你叫小明呀！
+> /exit
+```
+
+内置命令：`/help` `/tools` `/clear` `/exit`（或 Ctrl-D）。
 
 ## 会话记忆
 
@@ -106,8 +122,13 @@ baize -p ollama -m "hello" # 换一个
 - [x] 里程碑 1：`-m "hello"` 一次性问答（无工具）
 - [x] 里程碑 2：Runner 循环 + `file_read` 工具
 - [x] 里程碑 4：会话持久化（JSONL）与多 provider
+- [x] 里程碑 5：交互式 REPL
 - [ ] 里程碑 3：更多工具（`web_fetch`、`file_write` 等）
-- [ ] 后续：交互式 REPL、历史截断/摘要
+- [ ] 后续：system prompt 引导、历史截断/摘要
+
+## 代码导读
+
+逐文件讲解见 [docs/代码导读.md](docs/代码导读.md)，面向 Python 初学者。
 
 ## 试试 agent 循环
 

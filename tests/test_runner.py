@@ -127,3 +127,60 @@ def test_gives_up_after_max_turns():
 
     with pytest.raises(RunnerError, match="最大轮数"):
         run(provider, messages, max_turns=3)
+
+
+def test_tool_result_is_truncated_before_feedback(monkeypatch):
+    """工具结果过长时要截断后才回喂，否则一次读大文件就撑爆上下文。"""
+    import baize_agents.tools as T
+    from baize_agents.context.tokens import estimate_tokens
+    from baize_agents.tools.base import Tool
+
+    huge = "中" * 50000
+    fake = Tool(name="fake_tool", description="", parameters={}, func=lambda: huge)
+    monkeypatch.setitem(T.REGISTRY, "fake_tool", fake)
+
+    provider = FakeProvider(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "fake_tool", "arguments": "{}"}}
+                ],
+            },
+            {"role": "assistant", "content": "done"},
+        ]
+    )
+    messages = [{"role": "user", "content": "hi"}]
+
+    run(provider, messages, max_tool_result_tokens=500)
+
+    tool_message = [m for m in messages if m["role"] == "tool"][0]
+    assert "省略" in tool_message["content"]
+    assert estimate_tokens(tool_message["content"]) < 2000
+
+
+def test_short_tool_result_not_truncated(monkeypatch):
+    import baize_agents.tools as T
+    from baize_agents.tools.base import Tool
+
+    fake = Tool(name="small_tool", description="", parameters={}, func=lambda: "很短")
+    monkeypatch.setitem(T.REGISTRY, "small_tool", fake)
+
+    provider = FakeProvider(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "small_tool", "arguments": "{}"}}
+                ],
+            },
+            {"role": "assistant", "content": "done"},
+        ]
+    )
+    messages = [{"role": "user", "content": "hi"}]
+
+    run(provider, messages, max_tool_result_tokens=4000)
+    tool_message = [m for m in messages if m["role"] == "tool"][0]
+    assert tool_message["content"] == "很短"

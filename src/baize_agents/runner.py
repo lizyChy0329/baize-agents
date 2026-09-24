@@ -9,10 +9,14 @@ import json
 from typing import Any, Callable
 
 from . import tools
+from .context.truncate import truncate_tool_result
 from .providers.base import Provider, TextHook
 
 # 一轮 = 一次模型请求（一次可能执行多个工具）
 MAX_TURNS = 10
+
+# 单个工具结果的默认上限（token）。超过就截断，防止一次读大文件撑爆上下文。
+DEFAULT_MAX_TOOL_RESULT_TOKENS = 4000
 
 # 回调签名：(工具名, 参数字符串, 执行结果字符串)
 ToolCallHook = Callable[[str, str, str], None]
@@ -34,6 +38,7 @@ def run(
     on_text: TextHook | None = None,
     on_turn_end: TurnEndHook | None = None,
     stream: bool = True,
+    max_tool_result_tokens: int = DEFAULT_MAX_TOOL_RESULT_TOKENS,
 ) -> str:
     """跑完一个 agent 循环，返回模型的最终文本回答。
 
@@ -47,6 +52,9 @@ def run(
     on_text / stream 控制流式输出（每收到一段增量文本就调一次 on_text）。
     on_turn_end 在每轮结束时被调用（参数：这轮是否为铺垫），
     供上层把「工具调用前的铺垫」和「最终答案」区分显示。
+
+    max_tool_result_tokens 用于截断过长的工具结果：
+    工具结果是上下文里最大的膨胀源（读一个大文件就能塞进几万 token）。
     """
     schemas = tools.get_schemas()
 
@@ -84,12 +92,15 @@ def run(
             if on_tool_call is not None:
                 on_tool_call(name, raw_args, result)
 
-            # ④ 把结果记进历史（必须带上 tool_call_id 配对）
+            # ④ 截断，再记进历史（必须带 tool_call_id 配对）
+            #    截断后的内容既是回喂给模型的，也是落盘的，
+            #    否则会话文件会被大文件内容永久占满。
+            truncated = truncate_tool_result(result, max_tool_result_tokens)
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": call["id"],
-                    "content": result,
+                    "content": truncated,
                 }
             )
         # ⑤ 回到 ①：这次模型能看到工具结果了

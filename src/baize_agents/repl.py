@@ -51,6 +51,7 @@ def run_repl(
     session: Session,
     system_prompt: str | None = None,
     stream: bool = True,
+    max_tool_result_tokens: int = 4000,
 ) -> int:
     print(
         style.notice(
@@ -93,6 +94,7 @@ def run_repl(
                 on_text=printer,
                 on_turn_end=printer.end_turn,
                 stream=stream,
+                max_tool_result_tokens=max_tool_result_tokens,
             )
         except (ProviderError, RunnerError) as e:
             printer.finish()

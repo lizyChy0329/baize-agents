@@ -158,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
             session,
             system_prompt=system_prompt,
             stream=not args.no_stream,
+            max_tool_result_tokens=config.context.max_tool_result_tokens,
         )
 
     # ---- 有 -m：一次性问答 ----
@@ -179,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             on_text=printer,
             on_turn_end=printer.end_turn,
             stream=not args.no_stream,
+            max_tool_result_tokens=config.context.max_tool_result_tokens,
         )
     except (ProviderError, RunnerError) as e:
         printer.finish()

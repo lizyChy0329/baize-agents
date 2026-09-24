@@ -30,6 +30,11 @@ API key 支持两种写法（优先用 api_key_env，避免把密钥写进 JSON�
 {
   "system_prompt": "你是一个严谨的代码助手。"
 }
+
+可选的 context 配置（上下文治理，不写就用默认值）：
+{
+  "context": {"max_tool_result_tokens": 4000}
+}
 """
 from __future__ import annotations
 
@@ -67,6 +72,19 @@ class ProviderConfig:
 
 
 @dataclass(frozen=True)
+class ContextConfig:
+    """上下文治理参数。"""
+
+    # 单个工具结果最多允许多少 token，超过就截断
+    max_tool_result_tokens: int = 4000
+
+    @property
+    def max_tool_result_chars(self) -> int:
+        """给工具用的字符上限（工具层不关心 token）。"""
+        return self.max_tool_result_tokens * 4
+
+
+@dataclass(frozen=True)
 class Config:
     """可能配置了多个 provider，default 指定默认用哪个。"""
 
@@ -75,6 +93,7 @@ class Config:
     retry: RetryPolicy
     # 自定义系统提示词（None 表示用内置默认）
     system_prompt: str | None = None
+    context: ContextConfig = ContextConfig()
 
     @property
     def provider(self) -> ProviderConfig:
@@ -168,6 +187,22 @@ def _parse_retry(raw: object, path: Path) -> RetryPolicy:
     return policy
 
 
+def _parse_context(raw: object, path: Path) -> ContextConfig:
+    if raw is None:
+        return ContextConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError(f"配置文件 {path} 的 context 必须是对象")
+    try:
+        ctx = ContextConfig(
+            max_tool_result_tokens=int(raw.get("max_tool_result_tokens", 4000)),
+        )
+    except (TypeError, ValueError) as e:
+        raise ConfigError(f"配置文件 {path} 的 context 字段不合法：{e}") from e
+    if ctx.max_tool_result_tokens < 1:
+        raise ConfigError(f"配置文件 {path} 的 context.max_tool_result_tokens 至少为 1")
+    return ctx
+
+
 def load_config(explicit: str | None = None) -> Config:
     _load_dotenv(Path(".env"))
     path = _find_config(explicit)
@@ -215,4 +250,5 @@ def load_config(explicit: str | None = None) -> Config:
         default=default,
         retry=retry,
         system_prompt=system_prompt,
+        context=_parse_context(raw.get("context"), path),
     )

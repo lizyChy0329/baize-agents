@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable
 
 from ..config import ProviderConfig
+from .errors import ProviderError
 from .retry import RetryPolicy, retry_call
 
 # 重试回调：(第几次尝试, 错误, 将等待秒数)

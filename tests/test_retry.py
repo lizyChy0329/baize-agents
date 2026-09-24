@@ -171,3 +171,69 @@ def test_provider_error_base_is_not_retryable():
     assert TransientError.retryable is True
     assert RateLimitError.retryable is True
     assert AuthError.retryable is False
+
+
+# ---------------------------------------------------------------- 流式重试
+
+
+class _StreamProvider:
+    """最小的 Provider 子类，用来测 chat_stream 的重试行为。"""
+
+    def __init__(self, script, policy, clock):
+        from baize_agents.providers.base import Provider
+
+        class P(Provider):
+            def __init__(self):
+                super().__init__(config=None, policy=policy, sleep=clock.sleep)  # type: ignore[arg-type]
+                self.script = list(script)
+
+            def _chat_once(self, messages, tools=None):  # 测试用不到
+                raise AssertionError("不该走非流式路径")
+
+            def _stream_once(self, messages, tools, emit):
+                action = self.script.pop(0)
+                if isinstance(action, Exception):
+                    raise action
+                if action == "emit-then-fail":
+                    emit("半截")
+                    raise TransientError("中途断了")
+                emit(action)
+                return {"role": "assistant", "content": action}
+
+        self.instance = P()
+
+
+def test_stream_retries_when_nothing_emitted_yet():
+    clock = FakeClock()
+    holder = _StreamProvider([TransientError("连不上"), "成功"], RetryPolicy(max_attempts=3), clock)
+
+    chunks: list[str] = []
+    msg = holder.instance.chat_stream(
+        [{"role": "user", "content": "hi"}], on_text=chunks.append
+    )
+
+    assert msg["content"] == "成功"
+    assert chunks == ["成功"]
+    # 没吐字，可以重试。等待时长 = base_delay(1.0) + 0~25% 抖动
+    assert len(clock.slept) == 1
+    assert 1.0 <= clock.slept[0] <= 1.25
+
+
+def test_stream_does_not_retry_after_emitting():
+    """关键行为：已经吐了半截就不能重试，否则用户会看到重复的开头。"""
+    clock = FakeClock()
+    holder = _StreamProvider(["emit-then-fail"], RetryPolicy(max_attempts=3), clock)
+
+    chunks: list[str] = []
+    with pytest.raises(TransientError):
+        holder.instance.chat_stream([{"role": "user", "content": "hi"}], on_text=chunks.append)
+
+    assert chunks == ["半截"]  # 已经吐出去的字收不回来
+    assert clock.slept == []  # 一次都没重试
+
+
+def test_stream_imports_provider_error():
+    """回归测试：base.py 曾经漏导入 ProviderError，导致流式重试直接崩。"""
+    from baize_agents.providers import base
+
+    assert hasattr(base, "ProviderError")

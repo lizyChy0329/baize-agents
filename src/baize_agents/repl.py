@@ -12,6 +12,8 @@ import sys
 from typing import Any, Callable
 
 from . import tools
+from .config import ContextConfig
+from .governance import maybe_compact
 from .providers.base import Provider
 from .providers.errors import ProviderError
 from .runner import RunnerError, run
@@ -20,14 +22,21 @@ from .stream import StreamPrinter, make_tool_tracer
 from . import style
 
 HELP = """可用命令：
-  /help    显示这份帮助
-  /tools   列出可用工具
-  /clear   清空当前会话的历史
-  /exit    退出（也可以按 Ctrl-D）
+  /help     显示这份帮助
+  /tools    列出可用工具
+  /compact  现在就把历史压缩成摘要（腾出上下文空间）
+  /tokens   看看当前历史占多少 token
+  /clear    清空当前会话的历史
+  /exit     退出（也可以按 Ctrl-D）
 """
 
 
-def _handle_command(line: str, session: Session) -> bool:
+def _handle_command(
+    line: str,
+    session: Session,
+    provider: Provider | None = None,
+    context: ContextConfig | None = None,
+) -> bool:
     """处理 / 开头的命令。返回 True 表示要退出。"""
     cmd = line.split()[0].lower()
 
@@ -38,6 +47,23 @@ def _handle_command(line: str, session: Session) -> bool:
     elif cmd == "/tools":
         for tool in tools.REGISTRY.values():
             print(style.notice(f"  {tool.name}: {tool.description}"), file=sys.stderr)
+    elif cmd == "/tokens":
+        from .context.tokens import messages_tokens
+
+        used = messages_tokens(session.messages)
+        limit = context.compact_threshold_tokens if context else 24000
+        print(
+            style.notice(
+                f"当前历史 {len(session.messages)} 条，约 {used} tokens"
+                f"（超过 {limit} 会自动压缩）"
+            ),
+            file=sys.stderr,
+        )
+    elif cmd == "/compact":
+        if provider is None or context is None:
+            print(style.warning("此模式不支持 /compact"), file=sys.stderr)
+        else:
+            _do_compact(provider, session, context, force=True)
     elif cmd == "/clear":
         session.clear()
         print(style.notice(f"已清空会话 {session.name}"), file=sys.stderr)
@@ -46,13 +72,53 @@ def _handle_command(line: str, session: Session) -> bool:
     return False
 
 
+def _do_compact(
+    provider: Provider,
+    session: Session,
+    context: ContextConfig,
+    *,
+    force: bool = False,
+) -> None:
+    """压缩历史。force=True 时忽略阈值（/compact 手动触发用）。"""
+    from .context.compact import compact, needs_compaction
+    from .context.tokens import messages_tokens
+
+    if not force and not needs_compaction(session.messages, context.compact_threshold_tokens):
+        return
+    if len(session.messages) <= 2:
+        print(style.notice("历史太短，无需压缩"), file=sys.stderr)
+        return
+
+    before = messages_tokens(session.messages)
+    try:
+        result = compact(provider, session.messages, context.keep_recent_tokens)
+    except ProviderError as e:
+        print(style.warning(f"压缩失败：{e}"), file=sys.stderr)
+        return
+    if result is None:
+        print(style.notice("历史太短，无需压缩"), file=sys.stderr)
+        return
+
+    summary, dropped = result
+    session.record_compaction(summary)
+    after = messages_tokens(session.messages)
+    print(
+        style.notice(
+            f"[压缩] {dropped} 条消息 → 摘要 {len(summary)} 字；"
+            f"约 {before} → {after} tokens"
+        ),
+        file=sys.stderr,
+    )
+
+
 def run_repl(
     provider: Provider,
     session: Session,
     system_prompt: str | None = None,
     stream: bool = True,
-    max_tool_result_tokens: int = 4000,
+    context: ContextConfig | None = None,
 ) -> int:
+    ctx = context or ContextConfig()
     print(
         style.notice(
             f"baize-agents 交互模式（会话 {session.name}）。/help 看命令，/exit 退出。"
@@ -76,9 +142,12 @@ def run_repl(
         if not line:
             continue
         if line.startswith("/"):
-            if _handle_command(line, session):
+            if _handle_command(line, session, provider, ctx):
                 return 0
             continue
+
+        # 每轮开始前检查一次：历史太长就先压缩
+        _do_compact(provider, session, ctx)
 
         # 记下这一轮开始前的位置，便于中断时回滚
         before = len(session.messages)
@@ -94,7 +163,7 @@ def run_repl(
                 on_text=printer,
                 on_turn_end=printer.end_turn,
                 stream=stream,
-                max_tool_result_tokens=max_tool_result_tokens,
+                max_tool_result_tokens=ctx.max_tool_result_tokens,
             )
         except (ProviderError, RunnerError) as e:
             printer.finish()

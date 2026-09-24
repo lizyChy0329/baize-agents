@@ -18,6 +18,7 @@ import argparse
 import sys
 
 from .config import ConfigError, load_config
+from .governance import maybe_compact
 from .prompt import build_system_prompt
 from .providers.errors import ProviderError
 from .providers.openai_compat import OpenAICompatProvider
@@ -75,6 +76,24 @@ def _build_parser() -> argparse.ArgumentParser:
 def _fail(message: str) -> None:
     """统一的错误输出（红色）。"""
     print(style.error(f"[错误] {message}"))
+
+
+def _auto_compact(provider, session, config) -> None:
+    """历史超阈值就压缩，并把过程提示给用户。"""
+
+    def report(dropped: int, summary: str) -> None:
+        print(
+            style.notice(
+                f"[压缩] 历史过长，已把最早的 {dropped} 条消息摘要成一段（{len(summary)} 字）"
+            ),
+            file=sys.stderr,
+        )
+
+    try:
+        maybe_compact(provider, session, config.context, on_compact=report)
+    except ProviderError as e:
+        # 压缩失败不该让整个对话挂掉，提示一下继续用原文历史
+        print(style.warning(f"[警告] 历史压缩失败，继续使用完整历史：{e}"), file=sys.stderr)
 
 
 def _trace_retry(attempt: int, error: Exception, delay: float) -> None:
@@ -150,6 +169,10 @@ def main(argv: list[str] | None = None) -> int:
         if len(session):
             print(style.notice(f"[会话 {session.name}] 载入 {len(session)} 条历史"), file=sys.stderr)
 
+    # ---- 历史太长就先压缩（交互模式和一次性问答都要）----
+    if session is not None:
+        _auto_compact(provider, session, config)
+
     # ---- 没有 -m：进交互模式 ----
     if not args.message:
         assert session is not None  # 前面已挡住 --no-session 的情况
@@ -158,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             session,
             system_prompt=system_prompt,
             stream=not args.no_stream,
-            max_tool_result_tokens=config.context.max_tool_result_tokens,
+            context=config.context,
         )
 
     # ---- 有 -m：一次性问答 ----

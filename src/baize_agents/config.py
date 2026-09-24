@@ -33,7 +33,11 @@ API key 支持两种写法（优先用 api_key_env，避免把密钥写进 JSON�
 
 可选的 context 配置（上下文治理，不写就用默认值）：
 {
-  "context": {"max_tool_result_tokens": 4000}
+  "context": {
+    "max_tool_result_tokens": 4000,
+    "compact_threshold_tokens": 24000,
+    "keep_recent_tokens": 8000
+  }
 }
 """
 from __future__ import annotations
@@ -77,6 +81,10 @@ class ContextConfig:
 
     # 单个工具结果最多允许多少 token，超过就截断
     max_tool_result_tokens: int = 4000
+    # 历史总量超过这个就触发自动压缩
+    compact_threshold_tokens: int = 24000
+    # 压缩时保留最近多少 token 的消息原文
+    keep_recent_tokens: int = 8000
 
     @property
     def max_tool_result_chars(self) -> int:
@@ -195,11 +203,19 @@ def _parse_context(raw: object, path: Path) -> ContextConfig:
     try:
         ctx = ContextConfig(
             max_tool_result_tokens=int(raw.get("max_tool_result_tokens", 4000)),
+            compact_threshold_tokens=int(raw.get("compact_threshold_tokens", 24000)),
+            keep_recent_tokens=int(raw.get("keep_recent_tokens", 8000)),
         )
     except (TypeError, ValueError) as e:
         raise ConfigError(f"配置文件 {path} 的 context 字段不合法：{e}") from e
     if ctx.max_tool_result_tokens < 1:
         raise ConfigError(f"配置文件 {path} 的 context.max_tool_result_tokens 至少为 1")
+    if ctx.compact_threshold_tokens < 1:
+        raise ConfigError(f"配置文件 {path} 的 context.compact_threshold_tokens 至少为 1")
+    if ctx.keep_recent_tokens >= ctx.compact_threshold_tokens:
+        raise ConfigError(
+            f"配置文件 {path} 的 context.keep_recent_tokens 必须小于 compact_threshold_tokens"
+        )
     return ctx
 
 

@@ -36,6 +36,12 @@ def _safe_name(name: str) -> str:
     return name
 
 
+# 压缩记录的标记。JSONL 只能追加写，没法「删掉旧消息」，
+# 所以换个思路：追加一条「从前面的内容都已被摘要取代」的记录。
+# 副作用：文件不会变小（反而再长大一点），但读出来的消息列表是压缩过的。
+COMPACT_TYPE = "compact"
+
+
 def _repair(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """丢掉"没写完的工具调用"尾巴。
 
@@ -78,15 +84,33 @@ class Session:
         if not self.path.exists():
             return []
         messages: list[dict[str, Any]] = []
+        summary: str | None = None
         for lineno, raw in enumerate(
             self.path.read_text(encoding="utf-8").splitlines(), start=1
         ):
             if not raw.strip():
                 continue
             try:
-                messages.append(json.loads(raw))
+                record = json.loads(raw)
             except json.JSONDecodeError as e:
                 raise SessionError(f"{self.path} 第 {lineno} 行不是合法 JSON：{e}") from e
+
+            if record.get("_type") == COMPACT_TYPE:
+                # 这条记录之前的消息全部作废，只留摘要
+                summary = record.get("summary") or ""
+                messages = []
+                continue
+            messages.append(record)
+
+        if summary is not None:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "以下是本次会话较早内容的摘要（原始消息已被压缩）：\n"
+                    + summary,
+                },
+                *messages,
+            ]
         return _repair(messages)
 
     def add(self, message: dict[str, Any]) -> None:
@@ -109,6 +133,29 @@ class Session:
             self.path.unlink()
         self.messages = []
         self._saved = 0
+
+    def record_compaction(self, summary: str) -> None:
+        """把「历史已被压缩」写进文件。
+
+        日志式追加：先写一条 compact 记录，表示「此前所有消息都被 summary 取代」，
+        再把保留下来的尾部消息逐条写回去。
+
+        为什么不把摘要消息本身也写一行？因为它从 compact 记录里重建出来，
+        再写一行就会重复。
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {"_type": COMPACT_TYPE, "summary": summary},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+            # messages[0] 是摘要（由上面的记录重建），后面才是要保留的原文
+            for message in self.messages[1:]:
+                f.write(json.dumps(message, ensure_ascii=False) + "\n")
+        self._saved = len(self.messages)
 
     def __len__(self) -> int:
         return len(self.messages)

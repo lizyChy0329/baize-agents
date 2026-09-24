@@ -18,6 +18,7 @@ import argparse
 import sys
 
 from .config import ConfigError, load_config
+from .prompt import build_system_prompt
 from .providers.errors import ProviderError
 from .providers.openai_compat import OpenAICompatProvider
 from .repl import run_repl
@@ -45,6 +46,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--list", action="store_true", help="列出所有会话后退出")
     parser.add_argument("--clear", action="store_true", help="清空指定会话后退出")
     parser.add_argument("--config", default=None, help="配置文件路径（默认 ./config.json）")
+    parser.add_argument(
+        "--system",
+        default=None,
+        help="覆盖系统提示词（优先级高于 config.json 的 system_prompt）",
+    )
+    parser.add_argument(
+        "--show-system",
+        action="store_true",
+        help="打印最终的系统提示词后退出（不调模型）",
+    )
     parser.add_argument(
         "-p",
         "--provider",
@@ -97,9 +108,21 @@ def main(argv: list[str] | None = None) -> int:
         print("[错误] --no-session 只能用于一次性问答；交互模式需要有会话")
         return 1
 
-    # ---- 准备 provider ----
+    # ---- 组装系统提示词 ----
     try:
         config = load_config(args.config)
+    except ConfigError as e:
+        print(f"[错误] {e}")
+        return 1
+
+    system_prompt = build_system_prompt(args.system or config.system_prompt)
+
+    if args.show_system:
+        print(system_prompt)
+        return 0
+
+    # ---- 准备 provider ----
+    try:
         provider_config = config.get(args.provider)
         provider = OpenAICompatProvider(
             provider_config, config.retry, on_retry=_trace_retry
@@ -128,7 +151,12 @@ def main(argv: list[str] | None = None) -> int:
     # ---- 没有 -m：进交互模式 ----
     if not args.message:
         assert session is not None  # 前面已挡住 --no-session 的情况
-        return run_repl(provider, session, on_tool_call=_trace_tool_call)
+        return run_repl(
+            provider,
+            session,
+            on_tool_call=_trace_tool_call,
+            system_prompt=system_prompt,
+        )
 
     # ---- 有 -m：一次性问答 ----
     if session is not None:
@@ -140,7 +168,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- 跑 agent 循环 ----
     try:
-        reply = run(provider, messages, on_tool_call=_trace_tool_call)
+        reply = run(
+            provider,
+            messages,
+            on_tool_call=_trace_tool_call,
+            system_prompt=system_prompt,
+        )
     except (ProviderError, RunnerError) as e:
         print(f"[错误] {e}")
         return 1

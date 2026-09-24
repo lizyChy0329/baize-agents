@@ -24,6 +24,12 @@ API key 支持两种写法（优先用 api_key_env，避免把密钥写进 JSON�
 {
   "retry": {"max_attempts": 4, "base_delay": 1.0, "max_delay": 30.0}
 }
+
+可选的 system_prompt（不写就用内置的默认提示词；
+自定义会替换身份描述部分，「当前环境」仍会附加）：
+{
+  "system_prompt": "你是一个严谨的代码助手。"
+}
 """
 from __future__ import annotations
 
@@ -67,6 +73,8 @@ class Config:
     providers: dict[str, ProviderConfig]
     default: str
     retry: RetryPolicy
+    # 自定义系统提示词（None 表示用内置默认）
+    system_prompt: str | None = None
 
     @property
     def provider(self) -> ProviderConfig:
@@ -196,4 +204,15 @@ def load_config(explicit: str | None = None) -> Config:
     if len(providers) != len(providers_raw):
         raise ConfigError(f"配置文件 {path} 的 providers 里每一项都必须是对象")
 
-    return Config(providers=providers, default=default, retry=_parse_retry(raw.get("retry"), path))
+    retry = _parse_retry(raw.get("retry"), path)
+
+    system_prompt = raw.get("system_prompt")
+    if system_prompt is not None and not isinstance(system_prompt, str):
+        raise ConfigError(f"配置文件 {path} 的 system_prompt 必须是字符串")
+
+    return Config(
+        providers=providers,
+        default=default,
+        retry=retry,
+        system_prompt=system_prompt,
+    )

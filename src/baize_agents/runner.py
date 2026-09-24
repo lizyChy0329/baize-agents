@@ -27,18 +27,25 @@ def run(
     messages: list[dict[str, Any]],
     max_turns: int = MAX_TURNS,
     on_tool_call: ToolCallHook | None = None,
+    system_prompt: str | None = None,
 ) -> str:
     """跑完一个 agent 循环，返回模型的最终文本回答。
 
     注意：会**就地修改** messages（把模型回复和工具结果追加进去）。
     这份不断变长的 messages 就是模型"记得刚才干了什么"的原因，
     也是后续做会话持久化的基础。
+
+    system_prompt 只在发给 API 时临时插在最前面，**不会写进 messages**，
+    所以改了提示词能立刻对所有已有会话生效，磁盘上也不会重复存。
     """
     schemas = tools.get_schemas()
 
     for _ in range(max_turns):
-        # ① 问模型（带上工具说明书）
-        message = provider.chat(messages, tools=schemas)
+        # ① 问模型（带上工具说明书；系统提示词临时插入）
+        payload = messages
+        if system_prompt:
+            payload = [{"role": "system", "content": system_prompt}, *messages]
+        message = provider.chat(payload, tools=schemas)
         messages.append(message)
 
         tool_calls = message.get("tool_calls")

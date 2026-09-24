@@ -48,6 +48,7 @@ def run_repl(
     provider: Provider,
     session: Session,
     on_tool_call: Callable[[str, str, str], None] | None = None,
+    system_prompt: str | None = None,
 ) -> int:
     print(
         f"baize-agents 交互模式（会话 {session.name}）。/help 看命令，/exit 退出。",
@@ -79,7 +80,12 @@ def run_repl(
         session.add({"role": "user", "content": line})
 
         try:
-            reply = run(provider, session.messages, on_tool_call=on_tool_call)
+            reply = run(
+                provider,
+                session.messages,
+                on_tool_call=on_tool_call,
+                system_prompt=system_prompt,
+            )
         except (ProviderError, RunnerError) as e:
             print(f"[错误] {e}", file=sys.stderr)
             del session.messages[before:]  # 回滚这一轮

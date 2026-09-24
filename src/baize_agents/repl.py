@@ -16,6 +16,7 @@ from .providers.base import Provider
 from .providers.errors import ProviderError
 from .runner import RunnerError, run
 from .session import Session
+from .stream import StreamPrinter, make_tool_tracer
 
 HELP = """可用命令：
   /help    显示这份帮助
@@ -47,8 +48,8 @@ def _handle_command(line: str, session: Session) -> bool:
 def run_repl(
     provider: Provider,
     session: Session,
-    on_tool_call: Callable[[str, str, str], None] | None = None,
     system_prompt: str | None = None,
+    stream: bool = True,
 ) -> int:
     print(
         f"baize-agents 交互模式（会话 {session.name}）。/help 看命令，/exit 退出。",
@@ -79,22 +80,30 @@ def run_repl(
         before = len(session.messages)
         session.add({"role": "user", "content": line})
 
+        printer = StreamPrinter(enabled=stream)
         try:
             reply = run(
                 provider,
                 session.messages,
-                on_tool_call=on_tool_call,
+                on_tool_call=make_tool_tracer(printer),
                 system_prompt=system_prompt,
+                on_text=printer,
+                stream=stream,
             )
         except (ProviderError, RunnerError) as e:
+            printer.finish()
             print(f"[错误] {e}", file=sys.stderr)
             del session.messages[before:]  # 回滚这一轮
             continue
         except KeyboardInterrupt:
+            printer.finish()
             print("\n[已中断]", file=sys.stderr)
             del session.messages[before:]
             continue
 
         # 这一轮完整了，才落盘
         session.sync()
-        print(reply)
+        if printer.started:
+            printer.finish()  # 已经边收边打了，只需收尾换行
+        else:
+            print(reply)

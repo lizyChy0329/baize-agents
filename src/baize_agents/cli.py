@@ -24,6 +24,7 @@ from .providers.openai_compat import OpenAICompatProvider
 from .repl import run_repl
 from .runner import RunnerError, run
 from .session import Session, SessionError, list_sessions
+from .stream import StreamPrinter, make_tool_tracer
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -52,6 +53,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="覆盖系统提示词（优先级高于 config.json 的 system_prompt）",
     )
     parser.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="关闭流式输出（一次性等完整个回答，便于调试/对比）",
+    )
+    parser.add_argument(
         "--show-system",
         action="store_true",
         help="打印最终的系统提示词后退出（不调模型）",
@@ -63,18 +69,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="用哪个 provider（config.json 里定义的名字，默认取 default_provider）",
     )
     return parser
-
-
-def _trace_tool_call(name: str, arguments: str, result: str) -> None:
-    """把"模型要调什么工具、结果如何"打印到 stderr，方便观察循环在干嘛。
-
-    用 stderr 是为了不污染 stdout 上的最终答案（方便管道处理）。
-    """
-    preview = result.replace("\n", "\\n")
-    if len(preview) > 80:
-        preview = preview[:80] + "..."
-    print(f"[工具] {name}({arguments})", file=sys.stderr)
-    print(f"[结果] {preview}", file=sys.stderr)
 
 
 def _trace_retry(attempt: int, error: Exception, delay: float) -> None:
@@ -154,8 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_repl(
             provider,
             session,
-            on_tool_call=_trace_tool_call,
             system_prompt=system_prompt,
+            stream=not args.no_stream,
         )
 
     # ---- 有 -m：一次性问答 ----
@@ -167,14 +161,18 @@ def main(argv: list[str] | None = None) -> int:
         messages = [{"role": "user", "content": args.message}]
 
     # ---- 跑 agent 循环 ----
+    printer = StreamPrinter(enabled=not args.no_stream)
     try:
         reply = run(
             provider,
             messages,
-            on_tool_call=_trace_tool_call,
+            on_tool_call=make_tool_tracer(printer),
             system_prompt=system_prompt,
+            on_text=printer,
+            stream=not args.no_stream,
         )
     except (ProviderError, RunnerError) as e:
+        printer.finish()
         print(f"[错误] {e}")
         return 1
     finally:
@@ -182,5 +180,8 @@ def main(argv: list[str] | None = None) -> int:
         if session is not None:
             session.sync()
 
-    print(reply)
+    if printer.started:
+        printer.finish()  # 已经边收边打了，只需收尾换行
+    else:
+        print(reply)
     return 0

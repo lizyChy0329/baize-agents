@@ -9,7 +9,7 @@ import json
 from typing import Any, Callable
 
 from . import tools
-from .providers.base import Provider
+from .providers.base import Provider, TextHook
 
 # 一轮 = 一次模型请求（一次可能执行多个工具）
 MAX_TURNS = 10
@@ -28,6 +28,8 @@ def run(
     max_turns: int = MAX_TURNS,
     on_tool_call: ToolCallHook | None = None,
     system_prompt: str | None = None,
+    on_text: TextHook | None = None,
+    stream: bool = True,
 ) -> str:
     """跑完一个 agent 循环，返回模型的最终文本回答。
 
@@ -37,6 +39,8 @@ def run(
 
     system_prompt 只在发给 API 时临时插在最前面，**不会写进 messages**，
     所以改了提示词能立刻对所有已有会话生效，磁盘上也不会重复存。
+
+    on_text / stream 控制流式输出（每收到一段增量文本就调一次 on_text）。
     """
     schemas = tools.get_schemas()
 
@@ -45,7 +49,10 @@ def run(
         payload = messages
         if system_prompt:
             payload = [{"role": "system", "content": system_prompt}, *messages]
-        message = provider.chat(payload, tools=schemas)
+        if stream:
+            message = provider.chat_stream(payload, tools=schemas, on_text=on_text)
+        else:
+            message = provider.chat(payload, tools=schemas)
         messages.append(message)
 
         tool_calls = message.get("tool_calls")

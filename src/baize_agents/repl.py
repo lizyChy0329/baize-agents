@@ -91,6 +91,7 @@ def run_repl(
                 on_tool_call=make_tool_tracer(printer),
                 system_prompt=system_prompt,
                 on_text=printer,
+                on_turn_end=printer.end_turn,
                 stream=stream,
             )
         except (ProviderError, RunnerError) as e:

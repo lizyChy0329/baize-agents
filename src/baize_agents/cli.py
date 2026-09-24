@@ -177,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
             on_tool_call=make_tool_tracer(printer),
             system_prompt=system_prompt,
             on_text=printer,
+            on_turn_end=printer.end_turn,
             stream=not args.no_stream,
         )
     except (ProviderError, RunnerError) as e:

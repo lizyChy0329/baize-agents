@@ -17,6 +17,9 @@ MAX_TURNS = 10
 # 回调签名：(工具名, 参数字符串, 执行结果字符串)
 ToolCallHook = Callable[[str, str, str], None]
 
+# 一轮结束回调：参数为这一轮是否属于「铺垫」（后面跟了工具调用）
+TurnEndHook = Callable[[bool], None]
+
 
 class RunnerError(Exception):
     """循环没能正常结束。"""
@@ -29,6 +32,7 @@ def run(
     on_tool_call: ToolCallHook | None = None,
     system_prompt: str | None = None,
     on_text: TextHook | None = None,
+    on_turn_end: TurnEndHook | None = None,
     stream: bool = True,
 ) -> str:
     """跑完一个 agent 循环，返回模型的最终文本回答。
@@ -41,6 +45,8 @@ def run(
     所以改了提示词能立刻对所有已有会话生效，磁盘上也不会重复存。
 
     on_text / stream 控制流式输出（每收到一段增量文本就调一次 on_text）。
+    on_turn_end 在每轮结束时被调用（参数：这轮是否为铺垫），
+    供上层把「工具调用前的铺垫」和「最终答案」区分显示。
     """
     schemas = tools.get_schemas()
 
@@ -56,6 +62,8 @@ def run(
         messages.append(message)
 
         tool_calls = message.get("tool_calls")
+        if on_turn_end is not None:
+            on_turn_end(bool(tool_calls))
         # ② 没要工具 → 这就是最终答案，收工
         if not tool_calls:
             return message.get("content") or ""

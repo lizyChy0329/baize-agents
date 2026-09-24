@@ -25,6 +25,7 @@ from .repl import run_repl
 from .runner import RunnerError, run
 from .session import Session, SessionError, list_sessions
 from .stream import StreamPrinter, make_tool_tracer
+from . import style
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -71,10 +72,17 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _fail(message: str) -> None:
+    """统一的错误输出（红色）。"""
+    print(style.error(f"[错误] {message}"))
+
+
 def _trace_retry(attempt: int, error: Exception, delay: float) -> None:
     """重试时提示一下，否则用户会以为程序卡住了。"""
     print(
-        f"[重试 {attempt}] {error}\n         等待 {delay:.1f}s 后重试...",
+        style.warning(f"[重试 {attempt}] {error}")
+        + "\n         "
+        + style.notice(f"等待 {delay:.1f}s 后重试..."),
         file=sys.stderr,
     )
 
@@ -86,27 +94,27 @@ def main(argv: list[str] | None = None) -> int:
     # ---- 不消耗模型的子命令 ----
     if args.list:
         names = list_sessions()
-        print("\n".join(names) if names else "（还没有任何会话）")
+        print("\n".join(names) if names else style.notice("（还没有任何会话）"))
         return 0
 
     if args.clear:
         try:
             Session(args.session).clear()
         except SessionError as e:
-            print(f"[错误] {e}")
+            _fail(str(e))
             return 1
-        print(f"已清空会话：{args.session}")
+        print(style.notice(f"已清空会话：{args.session}"))
         return 0
 
     if not args.message and args.no_session:
-        print("[错误] --no-session 只能用于一次性问答；交互模式需要有会话")
+        _fail("--no-session 只能用于一次性问答；交互模式需要有会话")
         return 1
 
     # ---- 组装系统提示词 ----
     try:
         config = load_config(args.config)
     except ConfigError as e:
-        print(f"[错误] {e}")
+        _fail(str(e))
         return 1
 
     system_prompt = build_system_prompt(args.system or config.system_prompt)
@@ -122,12 +130,12 @@ def main(argv: list[str] | None = None) -> int:
             provider_config, config.retry, on_retry=_trace_retry
         )
     except (ConfigError, ProviderError) as e:
-        print(f"[错误] {e}")
+        _fail(str(e))
         return 1
 
     if len(config.names) > 1:
         used = args.provider or config.default
-        print(f"[provider] {used} ({provider_config.model})", file=sys.stderr)
+        print(style.notice(f"[provider] {used} ({provider_config.model})"), file=sys.stderr)
 
     # ---- 准备消息历史 ----
     try:
@@ -135,12 +143,12 @@ def main(argv: list[str] | None = None) -> int:
         if session is not None:
             session.load()
     except SessionError as e:
-        print(f"[错误] {e}")
+        _fail(str(e))
         return 1
 
     if session is not None:
         if len(session):
-            print(f"[会话 {session.name}] 载入 {len(session)} 条历史", file=sys.stderr)
+            print(style.notice(f"[会话 {session.name}] 载入 {len(session)} 条历史"), file=sys.stderr)
 
     # ---- 没有 -m：进交互模式 ----
     if not args.message:
@@ -173,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (ProviderError, RunnerError) as e:
         printer.finish()
-        print(f"[错误] {e}")
+        _fail(str(e))
         return 1
     finally:
         # 即使中途失败，也把已经发生的消息落盘

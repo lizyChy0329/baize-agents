@@ -17,6 +17,7 @@ from .providers.errors import ProviderError
 from .runner import RunnerError, run
 from .session import Session
 from .stream import StreamPrinter, make_tool_tracer
+from . import style
 
 HELP = """可用命令：
   /help    显示这份帮助
@@ -33,15 +34,15 @@ def _handle_command(line: str, session: Session) -> bool:
     if cmd in ("/exit", "/quit"):
         return True
     if cmd == "/help":
-        print(HELP, file=sys.stderr)
+        print(style.notice(HELP), file=sys.stderr)
     elif cmd == "/tools":
         for tool in tools.REGISTRY.values():
-            print(f"  {tool.name}: {tool.description}", file=sys.stderr)
+            print(style.notice(f"  {tool.name}: {tool.description}"), file=sys.stderr)
     elif cmd == "/clear":
         session.clear()
-        print(f"已清空会话 {session.name}", file=sys.stderr)
+        print(style.notice(f"已清空会话 {session.name}"), file=sys.stderr)
     else:
-        print(f"未知命令：{cmd}（试试 /help）", file=sys.stderr)
+        print(style.warning(f"未知命令：{cmd}（试试 /help）"), file=sys.stderr)
     return False
 
 
@@ -52,11 +53,13 @@ def run_repl(
     stream: bool = True,
 ) -> int:
     print(
-        f"baize-agents 交互模式（会话 {session.name}）。/help 看命令，/exit 退出。",
+        style.notice(
+            f"baize-agents 交互模式（会话 {session.name}）。/help 看命令，/exit 退出。"
+        ),
         file=sys.stderr,
     )
     if len(session):
-        print(f"已载入 {len(session)} 条历史，接着聊吧。", file=sys.stderr)
+        print(style.notice(f"已载入 {len(session)} 条历史，接着聊吧。"), file=sys.stderr)
 
     while True:
         try:
@@ -92,12 +95,12 @@ def run_repl(
             )
         except (ProviderError, RunnerError) as e:
             printer.finish()
-            print(f"[错误] {e}", file=sys.stderr)
+            print(style.error(f"[错误] {e}"), file=sys.stderr)
             del session.messages[before:]  # 回滚这一轮
             continue
         except KeyboardInterrupt:
             printer.finish()
-            print("\n[已中断]", file=sys.stderr)
+            print(style.warning("\n[已中断]"), file=sys.stderr)
             del session.messages[before:]
             continue
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 import sys
 from typing import Callable
 
+from . import style
+
 ToolHook = Callable[[str, str, str], None]
 
 
@@ -46,14 +48,18 @@ class StreamPrinter:
 
 
 def make_tool_tracer(printer: StreamPrinter) -> ToolHook:
-    """造一个工具日志回调；打印前会先结束流式输出的当前行。"""
+    """造一个工具日志回调；打印前会先结束流式输出的当前行。
+
+    用青色的 [工具] 标记 agent 的动作，用暗灰的 [结果] 展示细节，
+    这样它们和模型的回答（不上色）在视觉上一眼能分开。
+    """
 
     def trace(name: str, arguments: str, result: str) -> None:
         printer.finish()  # 关键：避免工具日志粘在正文后面
         preview = result.replace("\n", "\\n")
         if len(preview) > 80:
             preview = preview[:80] + "..."
-        print(f"[工具] {name}({arguments})", file=sys.stderr)
-        print(f"[结果] {preview}", file=sys.stderr)
+        print(style.tool_call(f"[工具] {name}({arguments})"), file=sys.stderr)
+        print(style.tool_result(f"[结果] {preview}"), file=sys.stderr)
 
     return trace
